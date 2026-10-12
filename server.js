@@ -91,7 +91,6 @@ app.get('/api/bookings/:id', async (req, res) => {
 });
 
 // --- Admin ---
-app.get('/api/diag-pw', (req,res)=>{const h=require('crypto').createHash('sha256').update(ADMIN_PASSWORD).digest('hex');res.json({len:ADMIN_PASSWORD.length,h:h.slice(0,8),raw:(process.env.ADMIN_PASSWORD||'').length});});
 const auth = (req, res, next) => {
   const h = req.headers.authorization || '';
   const dec = Buffer.from(h.split(' ')[1] || '', 'base64').toString();
