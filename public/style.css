@@ -74,3 +74,7 @@ header h1{background:var(--gold);-webkit-background-clip:text;background-clip:te
 .player{border-top:1px solid rgba(212,175,55,.3);background:linear-gradient(90deg,#000 0%,#06140b 100%)}
 .ok{color:var(--spot)}
 .card h2.ok{color:var(--spot)}
+
+.pm{display:grid;gap:8px;margin:6px 0 4px}.opt{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid #333;border-radius:10px;background:#181818;cursor:pointer;margin:0}
+.opt input{width:auto;margin:0;accent-color:#1ed760}.opt small{color:#b3b3b3}.opt:has(input:checked){border-color:#d4af37;box-shadow:0 0 0 1px #d4af37}
+.pend{color:#d4af37}.btns{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.btns button{width:auto;padding:8px 14px;margin:0}

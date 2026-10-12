@@ -28,24 +28,28 @@ app.get('/api/config', (req, res) => res.json({ salonName: cfg.salonName, servic
   open: cfg.open, close: cfg.close, horizon: cfg.bookingHorizonDays, taxes: cfg.taxes, demo: DEMO, tz: cfg.timezone }));
 app.get('/api/slots', (req, res) => res.json(availableSlots(db, req.query.service, req.query.date)));
 
+const INTERAC_EMAIL = process.env.INTERAC_EMAIL || 'jacesavard@gmail.com';
+const INTERAC_HOLD_H = 48;
+const ref = id => id.slice(0, 8).toUpperCase();
 const fmt = ms => DateTime.fromMillis(ms, { zone: cfg.timezone }).setLocale('fr-CA').toFormat("cccc d LLLL yyyy 'à' HH 'h' mm");
 
 const createPending = db.transaction(b => {
   const day = DateTime.fromMillis(b.start_ms, { zone: cfg.timezone }).startOf('day');
   const ok = availableSlots(db, b.service_id, day.toISODate()).some(s => DateTime.fromISO(s.start).toMillis() === b.start_ms);
   if (!ok) throw new Error('Cette plage n\'est plus disponible.');
-  db.prepare(`INSERT INTO bookings VALUES (@id,@service_id,@start_ms,@end_ms,@name,@phone,@email,@note,@deposit,'pending',NULL,NULL,@created_ms)`).run(b);
+  db.prepare(`INSERT INTO bookings VALUES (@id,@service_id,@start_ms,@end_ms,@name,@phone,@email,@note,@deposit,@status,NULL,NULL,@created_ms)`).run(b);
 });
 
 app.post('/api/bookings', async (req, res) => {
   try {
-    const { service, start, name, phone, email, note } = req.body;
+    const { service, start, name, phone, email, note, method } = req.body;
     const s = svc(service);
     if (!s || !start || !name?.trim() || !phone?.trim() || !/^\S+@\S+\.\S+$/.test(email || '')) return res.status(400).json({ error: 'Veuillez remplir tous les champs requis.' });
     const start_ms = DateTime.fromISO(start).toMillis();
     const b = { id: crypto.randomUUID(), service_id: s.id, start_ms, end_ms: start_ms + s.duration * 60000, name: name.trim(), phone: phone.trim(),
-      email: email.trim(), note: (note || '').trim().slice(0, 500), deposit: s.deposit, created_ms: Date.now() };
+      email: email.trim(), note: (note || '').trim().slice(0, 500), deposit: s.deposit, created_ms: Date.now(), status: method === 'interac' ? 'interac' : 'pending' };
     createPending(b);
+    if (b.status === 'interac') return res.json({ url: `/confirmation.html?id=${b.id}` });
     if (DEMO) return res.json({ url: `/paiement-demo.html?id=${b.id}` });
     const session = await stripe.checkout.sessions.create({
       mode: 'payment', customer_email: b.email, locale: 'fr-CA',
@@ -61,9 +65,9 @@ app.post('/api/bookings', async (req, res) => {
   } catch (e) { res.status(409).json({ error: e.message }); }
 });
 
-async function confirm(id) {
+async function confirm(id, allowInterac = false) {
   const b = db.prepare('SELECT * FROM bookings WHERE id=?').get(id);
-  if (b && b.status === 'pending') {
+  if (b && (b.status === 'pending' || (allowInterac && b.status === 'interac'))) {
     db.prepare("UPDATE bookings SET status='confirmed' WHERE id=?").run(id);
     const evId = await calendar.pushBooking(b, svc(b.service_id));
     if (evId) db.prepare('UPDATE bookings SET calendar_event_id=? WHERE id=?').run(evId, id);
@@ -81,7 +85,9 @@ app.get('/api/bookings/:id', async (req, res) => {
     if (sess.payment_status === 'paid') { await confirm(b.id); b = db.prepare('SELECT * FROM bookings WHERE id=?').get(b.id); }
   }
   const s = svc(b.service_id);
-  res.json({ service: s.name, when: fmt(b.start_ms), name: b.name, email: b.email, deposit: b.deposit, status: b.status, demo: DEMO, priceNote: s.priceNote || `${s.price} $` });
+  let status = b.status;
+  if (status === 'interac' && b.created_ms < Date.now() - INTERAC_HOLD_H * 3600000) status = 'expired';
+  res.json({ ref: ref(b.id), interacEmail: INTERAC_EMAIL, holdHours: INTERAC_HOLD_H, expiresAt: fmt(b.created_ms + INTERAC_HOLD_H * 3600000), service: s.name, when: fmt(b.start_ms), name: b.name, email: b.email, deposit: b.deposit, status, demo: DEMO, priceNote: s.priceNote || `${s.price} $` });
 });
 
 // --- Admin ---
@@ -94,9 +100,12 @@ const auth = (req, res, next) => {
 app.get('/admin', auth, (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
 app.get('/api/admin/data', auth, (req, res) => {
   const now = Date.now() - 86400000;
+  const holdCut = Date.now() - INTERAC_HOLD_H * 3600000;
   res.json({
+    interac: db.prepare("SELECT * FROM bookings WHERE status='interac' AND created_ms > ? AND end_ms > ? ORDER BY start_ms").all(holdCut, now)
+      .map(b => ({ ...b, ref: ref(b.id), service: svc(b.service_id).name, when: fmt(b.start_ms), expires: fmt(b.created_ms + INTERAC_HOLD_H * 3600000) })),
     bookings: db.prepare("SELECT * FROM bookings WHERE status='confirmed' AND end_ms > ? ORDER BY start_ms").all(now)
-      .map(b => ({ ...b, service: svc(b.service_id).name, when: fmt(b.start_ms) })),
+      .map(b => ({ ...b, ref: ref(b.id), service: svc(b.service_id).name, when: fmt(b.start_ms) })),
     blocks: db.prepare('SELECT * FROM blocks WHERE end_ms > ? ORDER BY start_ms').all(now).map(b => ({ ...b, from: fmt(b.start_ms), to: fmt(b.end_ms) })),
   });
 });
@@ -108,6 +117,11 @@ app.post('/api/admin/blocks', auth, (req, res) => {
   res.json({ ok: true });
 });
 app.delete('/api/admin/blocks/:id', auth, (req, res) => { db.prepare('DELETE FROM blocks WHERE id=?').run(req.params.id); res.json({ ok: true }); });
+app.post('/api/admin/bookings/:id/confirm', auth, async (req, res) => {
+  const b = db.prepare('SELECT * FROM bookings WHERE id=?').get(req.params.id);
+  if (!b || b.status !== 'interac') return res.status(400).json({ error: 'Aucun virement en attente pour ce rendez-vous.' });
+  await confirm(b.id, true); res.json({ ok: true });
+});
 app.post('/api/admin/bookings/:id/cancel', auth, async (req, res) => {
   const b = db.prepare('SELECT * FROM bookings WHERE id=?').get(req.params.id);
   db.prepare("UPDATE bookings SET status='cancelled' WHERE id=?").run(req.params.id);

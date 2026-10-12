@@ -24,4 +24,22 @@ const book=async(s,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',hea
  await fetch(B+'/api/admin/blocks',{method:'POST',headers:{'Content-Type':'application/json',Authorization:auth},body:JSON.stringify({date:D,from:'17:00',to:'18:00',reason:'Pause'})});
  ok(!(await slots('coupe-homme')).find(x=>['17:00','17:30'].includes(x.time)),'Plage bloquée par admin non disponible');
  const a=await (await fetch(B+'/api/admin/data',{headers:{Authorization:auth}})).json();ok(a.bookings.length===5&&a.blocks.length===1,'Admin liste 5 RDV + 1 blocage');
+ // --- Virement Interac ---
+ const ib=async(sv,t)=>(await (await fetch(B+'/api/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({service:sv,start:`${D}T${t}:00.000-04:00`,name:'Interac',phone:'514-555-1111',email:'i@ex.com',method:'interac'})})).json());
+ const r1=await ib('coupe-homme','18:00');const iid=r1.url&&new URL(r1.url,B).searchParams.get('id');
+ ok(r1.url?.startsWith('/confirmation.html'),'Interac: pas de redirection Stripe, page de confirmation');
+ let ibk=await (await fetch(B+'/api/bookings/'+iid)).json();
+ ok(ibk.status==='interac'&&ibk.interacEmail==='jacesavard@gmail.com'&&ibk.ref?.length===8&&ibk.deposit===10,'Interac: en attente, courriel + n° de réservation + dépôt 10 $');
+ ok(!(await slots('coupe-homme')).find(x=>x.time==='18:00'),'Interac: plage retenue pendant l\'attente');
+ ok((await fetch(B+'/api/demo-pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:iid})}),(await (await fetch(B+'/api/bookings/'+iid)).json()).status==='interac'),'Interac: non confirmé sans action admin');
+ let ad=await (await fetch(B+'/api/admin/data',{headers:{Authorization:auth}})).json();
+ ok(ad.interac.length===1&&ad.interac[0].id===iid,'Admin: virement en attente listé');
+ ok((await fetch(B+'/api/admin/bookings/'+iid+'/confirm',{method:'POST'})).status===401,'Admin: confirmation sans mot de passe refusée');
+ await fetch(B+'/api/admin/bookings/'+iid+'/confirm',{method:'POST',headers:{Authorization:auth}});
+ ad=await (await fetch(B+'/api/admin/data',{headers:{Authorization:auth}})).json();
+ ok((await (await fetch(B+'/api/bookings/'+iid)).json()).status==='confirmed'&&ad.interac.length===0&&ad.bookings.length===6,'Admin: « Confirmer paiement reçu » confirme le RDV');
+ const r2=await ib('coupe-femme','18:30');const iid2=new URL(r2.url,B).searchParams.get('id');
+ ok((await (await fetch(B+'/api/bookings/'+iid2)).json()).deposit===10,'Interac coupe femme: dépôt 10 $');
+ await fetch(B+'/api/admin/bookings/'+iid2+'/cancel',{method:'POST',headers:{Authorization:auth}});
+ ok((await slots('coupe-homme')).find(x=>x.time==='18:30'),'Admin: « Annuler » libère la plage');
  console.log(`\n${pass} réussis, ${fail} échoués`);})();
