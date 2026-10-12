@@ -1,0 +1,27 @@
+const B='http://localhost:3000',D='2026-10-14';let pass=0,fail=0;
+const ok=(c,m)=>{console.log((c?'✅':'❌')+' '+m);c?pass++:fail++};
+const slots=async s=>(await (await fetch(`${B}/api/slots?service=${s}&date=${D}`)).json());
+const book=async(s,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({service:s,start:`${D}T${t}:00.000-04:00`,name:'Test '+s,phone:'514-555-0000',email:'t@ex.com'})});const j=await r.json();
+ if(j.url){const id=new URL(j.url,B).searchParams.get('id');await fetch(B+'/api/demo-pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});return (await (await fetch(B+'/api/bookings/'+id)).json()).status}return 'REFUSÉ: '+j.error};
+(async()=>{if(!(await (await fetch(B+'/api/config')).json()).demo){console.log('Arrêt: le serveur doit tourner en mode démo (sans STRIPE_SECRET_KEY) pour les tests.');process.exit(1)}
+ ok((await slots('coupe-homme')).length===22,'22 plages coupe 8h30-19h00 mercredi');
+ ok((await (await fetch(`${B}/api/slots?service=coupe-homme&date=2026-10-12`)).json()).length===0,'Lundi fermé');
+ ok((await slots('coloration-meches')).at(-1).time==='15:30','Dernière plage mèches 15h30 (fin 19h30)');
+ ok(await book('coupe-homme','08:30')==='confirmed','Coupe homme 8h30 réservée');
+ ok((await book('coupe-femme','08:30')).startsWith('REFUSÉ'),'Double réservation 8h30 bloquée');
+ ok(await book('coloration','10:00')==='confirmed','Coloration 10h00-12h00 réservée (pause 10h30)');
+ const s=await slots('coupe-femme');ok(s.find(x=>x.time==='10:30')?.inGap===true,'Plage 10h30 offerte pour coupe pendant la pause');
+ ok(!s.find(x=>['10:00','11:00','11:30'].includes(x.time)),'10h00/11h00/11h30 non offertes');
+ ok(!(await slots('coupe-femme-plis')).find(x=>x.time==='10:30'),'Coupe+plis (60 min) refusée dans la pause');
+ ok((await book('permanente','10:30')).startsWith('REFUSÉ'),'Permanente chevauchant pause refusée');
+ ok(await book('coupe-enfant','10:30')==='confirmed','Coupe enfant réservée dans la pause 10h30');
+ ok((await book('coupe-homme','10:30')).startsWith('REFUSÉ'),'Pause déjà prise: 2e coupe bloquée');
+ ok(await book('coupe-homme','13:00')==='confirmed','Coupe 13h00 réservée');
+ ok((await book('coloration-deco','12:30')).startsWith('REFUSÉ'),'Déco 12h30 refusée (13h00 occupée, pause à 13h30)');
+ ok(await book('coloration-meches','12:00')==='confirmed','Mèches 12h00 réservée (sa pause 13h00 contient la coupe existante)');
+ const auth='Basic '+Buffer.from('jace:test123').toString('base64');
+ ok((await fetch(B+'/api/admin/data')).status===401,'Admin sans mot de passe refusé');
+ await fetch(B+'/api/admin/blocks',{method:'POST',headers:{'Content-Type':'application/json',Authorization:auth},body:JSON.stringify({date:D,from:'17:00',to:'18:00',reason:'Pause'})});
+ ok(!(await slots('coupe-homme')).find(x=>['17:00','17:30'].includes(x.time)),'Plage bloquée par admin non disponible');
+ const a=await (await fetch(B+'/api/admin/data',{headers:{Authorization:auth}})).json();ok(a.bookings.length===5&&a.blocks.length===1,'Admin liste 5 RDV + 1 blocage');
+ console.log(`\n${pass} réussis, ${fail} échoués`);})();
