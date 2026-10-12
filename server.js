@@ -9,7 +9,7 @@ const calendar = require('./lib/calendar');
 
 const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD; // admin désactivé si absent
+const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || '').trim(); // admin désactivé si absent
 const stripe = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
 const DEMO = !stripe;
 
@@ -93,8 +93,9 @@ app.get('/api/bookings/:id', async (req, res) => {
 // --- Admin ---
 const auth = (req, res, next) => {
   const h = req.headers.authorization || '';
-  const [u, p] = Buffer.from(h.split(' ')[1] || '', 'base64').toString().split(':');
-  if (ADMIN_PASSWORD && p === ADMIN_PASSWORD) return next();
+  const dec = Buffer.from(h.split(' ')[1] || '', 'base64').toString();
+  const p = dec.slice(dec.indexOf(':') + 1).trim();
+  if (ADMIN_PASSWORD && dec.includes(':') && p === ADMIN_PASSWORD) return next();
   res.set('WWW-Authenticate', 'Basic realm="admin"').status(401).send('Authentification requise');
 };
 app.get('/admin', auth, (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
