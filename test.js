@@ -31,9 +31,12 @@ const book=async(s,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',hea
  ok(!(await slots('coupe-homme')).find(x=>['17:00','17:30'].includes(x.time)),'Plage bloquée par admin non disponible');
  const a=await (await fetch(B+'/api/admin/data',{headers:{Authorization:auth}})).json();ok(a.bookings.length===5&&a.blocks.length===1,'Admin liste 5 RDV + 1 blocage');
  // --- Virement Interac ---
- const ib=async(sv,t)=>(await (await fetch(B+'/api/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({service:sv,start:`${D}T${t}:00.000-04:00`,name:'Interac',phone:'514-555-1111',email:'i@ex.com',method:'interac'})})).json());
+ ok((await fetch(B+'/api/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({service:'coupe-homme',start:`${D}T18:00:00.000-04:00`,name:'X',phone:'514-555-1111',email:'i@ex.com',method:'interac'})})).status===400,'Nouvelle réservation Interac refusée');
+ ok((await fetch(B+'/api/tips',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'X',tip:'custom',tipCustom:'5',method:'interac'})})).status===400,'Nouveau pourboire Interac refusé');
+ const legacy=async(body)=>{const j=await (await fetch(B+'/api/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();const id=new URL(j.url,B).searchParams.get('id');await fetch(B+'/api/demo-legacy-interac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});return {url:'/confirmation.html?id='+id}};
+ const ib=async(sv,t)=>legacy({service:sv,start:`${D}T${t}:00.000-04:00`,name:'Interac',phone:'514-555-1111',email:'i@ex.com'});
  const r1=await ib('coupe-homme','18:00');const iid=r1.url&&new URL(r1.url,B).searchParams.get('id');
- ok(r1.url?.startsWith('/confirmation.html'),'Interac: pas de redirection Stripe, page de confirmation');
+ ok(r1.url?.startsWith('/confirmation.html'),'Ancienne réservation Interac: page de confirmation');
  let ibk=await (await fetch(B+'/api/bookings/'+iid)).json();
  ok(ibk.status==='interac'&&ibk.interacEmail==='jacesavard@gmail.com'&&ibk.ref?.length===8&&ibk.deposit===10,'Interac: en attente, courriel + n° de réservation + dépôt 10 $');
  ok(!(await slots('coupe-homme')).find(x=>x.time==='18:00'),'Interac: plage retenue pendant l\'attente');
@@ -55,14 +58,14 @@ const book=async(s,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',hea
   ok(T.tipCents(25,'none')===0&&T.tipCents(25,'')===0&&T.tipCents(25,'12')===0,'Pourboire: aucun / pourcentage non permis = 0');
   ok(T.tipCents(0,'custom','5,50')===550&&T.tipCents(25,'custom','7')===700&&T.tipCents(25,'custom','-3')===0&&T.tipCents(25,'custom','abc')===0,'Pourboire perso: 5,50 → 550 ¢, négatif/invalide → 0');
   ok(T.tipCents(25,'custom','99999')===T.MAX_CENTS&&T.fmt(375)==='3,75 $','Pourboire perso plafonné à 500 $ + format 3,75 $');
-  const rb=await (await fetch(B+'/api/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({service:'coupe-femme',start:`2026-10-16T09:00:00.000-04:00`,name:'Tip Test',phone:'514-555-2222',email:'p@ex.com',method:'interac',tip:'20'})})).json();
+  const rb=await legacy({service:'coupe-femme',start:`2026-10-16T09:00:00.000-04:00`,name:'Tip Test',phone:'514-555-2222',email:'p@ex.com',tip:'20'});
   const tb=await (await fetch(B+'/api/bookings/'+new URL(rb.url,B).searchParams.get('id'))).json();
   ok(tb.tipCents===600&&tb.totalCents===1600,'Réservation Interac + 20 %: pourboire 6 $, total à envoyer 16 $');
   const pr=await (await fetch(B+'/api/tip-ref/'+tb.ref)).json();ok(pr.service==='Coupe femme'&&pr.price===30,'Page pourboire ?ref= : service et prix préremplis');
   const t1=await (await fetch(B+'/api/tips',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ref:tb.ref,tip:'15',method:'card'})})).json();
   const t1d=await (await fetch(B+'/api/tips/'+new URL(t1.url,B).searchParams.get('merci'))).json();ok(t1d.amountCents===450&&t1d.status==='paid','Pourboire après RDV 15 % de 30 $ = 4,50 $ (démo payé)');
-  const t2=await (await fetch(B+'/api/tips',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Ami',tip:'custom',tipCustom:'10',method:'interac'})})).json();
-  const t2id=new URL(t2.url,B).searchParams.get('merci');ok((await (await fetch(B+'/api/tips/'+t2id)).json()).interacEmail==='jacesavard@gmail.com','Pourboire Interac: instructions jacesavard@gmail.com');
+  const t2=await (await fetch(B+'/api/tips',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Ami',tip:'custom',tipCustom:'10'})})).json();
+  const t2id=new URL(t2.url,B).searchParams.get('merci');await fetch(B+'/api/demo-legacy-interac',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:t2id,kind:'tip'})});ok((await (await fetch(B+'/api/tips/'+t2id)).json()).interacEmail==='jacesavard@gmail.com','Pourboire Interac: instructions jacesavard@gmail.com');
   ok((await fetch(B+'/api/tips',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tip:'none'})})).status===400,'Pourboire vide refusé');
   let ad2=await (await fetch(B+'/api/admin/data',{headers:{Authorization:auth}})).json();
   ok(ad2.tips.length===3&&ad2.tipsTotalCents===450,'Admin: 3 pourboires listés, 4,50 $ reçus');
@@ -76,7 +79,7 @@ const book=async(s,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',hea
   const b2=X.compute(3000);ok(b2.tps===150&&b2.tvq===299&&b2.total===3449,'Taxes: 30 $ → TPS 1,50, TVQ 2,99, total 34,49 $');
   const c2=X.compute(4000);ok(c2.tps===200&&c2.tvq===399&&c2.total===4599,'Taxes: 40 $ → total 45,99 $');
   ok(X.balance(2500,1000)===1874&&X.balance(0,1000)===0,'Solde au salon 25 $ dépôt 10 $ = 18,74 $');
-  const rb=await (await fetch(B+'/api/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({service:'coupe-homme',start:`2026-10-16T15:00:00.000-04:00`,name:'Tax Test',phone:'514-555-3333',email:'x@ex.com',method:'interac',tip:'15'})})).json();
+  const rb=await legacy({service:'coupe-homme',start:`2026-10-16T15:00:00.000-04:00`,name:'Tax Test',phone:'514-555-3333',email:'x@ex.com',tip:'15'});
   const tb=await (await fetch(B+'/api/bookings/'+new URL(rb.url,B).searchParams.get('id'))).json();
   ok(tb.tpsCents===125&&tb.tvqCents===249&&tb.totalTaxInclCents===2874&&tb.balanceCents===1874&&tb.tpsNo==='774132096 RT0001'&&tb.tvqNo==='4027999251 TQ0002','Réservation: taxes stockées, total 28,74, solde 18,74, numéros de taxes');
   ok(tb.tipCents===375&&tb.totalCents===1375,'Pourboire non taxé (15 % de 25 $ = 3,75) et dépôt inchangé (Interac 13,75 $)');

@@ -53,11 +53,12 @@ const createPending = db.transaction(b => {
 app.post('/api/bookings', async (req, res) => {
   try {
     const { service, start, name, phone, email, note, method, tip, tipCustom } = req.body;
+    if (method === 'interac') return res.status(400).json({ error: 'Le virement Interac n\'est plus accepté. Le dépôt se paie par carte; le solde (taxes incluses) se paie au salon.' });
     const s = svc(service);
     if (!s || !start || !name?.trim() || !phone?.trim() || !/^\S+@\S+\.\S+$/.test(email || '')) return res.status(400).json({ error: 'Veuillez remplir tous les champs requis.' });
     const start_ms = DateTime.fromISO(start).toMillis();
     const b = { id: crypto.randomUUID(), service_id: s.id, start_ms, end_ms: start_ms + s.duration * 60000, name: name.trim(), phone: phone.trim(),
-      email: email.trim(), note: (note || '').trim().slice(0, 500), deposit: s.deposit, created_ms: Date.now(), tip_cents: 0, status: method === 'interac' ? 'interac' : 'pending' };
+      email: email.trim(), note: (note || '').trim().slice(0, 500), deposit: s.deposit, created_ms: Date.now(), tip_cents: 0, status: 'pending' };
     b.tip_cents = Tips.tipCents(basePrice(s), tip, tipCustom); // pourboire sur le prix avant taxes, non taxé
     const tx = Taxes.compute(basePrice(s) * 100); b.tps_cents = tx.tps; b.tvq_cents = tx.tvq;
     createPending(b);
@@ -86,6 +87,15 @@ async function confirm(id, allowInterac = false) {
     if (evId) db.prepare('UPDATE bookings SET calendar_event_id=? WHERE id=?').run(evId, id);
   }
 }
+// Démo/tests seulement: simule une ancienne réservation ou un ancien pourboire Interac (données existantes)
+app.post('/api/demo-legacy-interac', (req, res) => {
+  if (!DEMO) return res.status(404).end();
+  const { id, kind } = req.body || {};
+  if (kind === 'tip') db.prepare("UPDATE tips SET method='interac', status='interac' WHERE id=?").run(id);
+  else db.prepare("UPDATE bookings SET status='interac' WHERE id=? AND status='pending'").run(id);
+  res.json({ ok: true });
+});
+
 app.post('/api/demo-pay', async (req, res) => {
   if (!DEMO) return res.status(403).json({ error: 'Mode démo désactivé' });
   await confirm(req.body.id); res.json({ ok: true });
@@ -127,10 +137,11 @@ app.post('/api/tips', async (req, res) => {
     let b = null;
     if (r) b = db.prepare('SELECT * FROM bookings WHERE substr(id,1,8)=?').get(String(r).toLowerCase().replace(/[^0-9a-f]/g, '').slice(0, 8));
     const base = b ? basePrice(svc(b.service_id)) : Math.min(Math.max(Number(String(price || 0).replace(',', '.')) || 0, 0), 1000);
+    if (method === 'interac') return res.status(400).json({ error: 'Le virement Interac n\'est plus accepté. Pourboire par carte seulement.' });
     const cents = Tips.tipCents(base, tip, tipCustom);
     if (cents < 100) return res.status(400).json({ error: 'Choisissez un pourboire d\'au moins 1 $.' });
     const t = { id: crypto.randomUUID(), booking_id: b?.id || null, name: (name || b?.name || '').trim().slice(0, 100), service: b ? svc(b.service_id).name : String(service || '').slice(0, 100),
-      amount_cents: cents, method: method === 'interac' ? 'interac' : 'card', status: method === 'interac' ? 'interac' : 'pending', created_ms: Date.now() };
+      amount_cents: cents, method: 'card', status: 'pending', created_ms: Date.now() };
     db.prepare('INSERT INTO tips (id,booking_id,name,service,amount_cents,method,status,stripe_session,created_ms) VALUES (?,?,?,?,?,?,?,NULL,?)')
       .run(t.id, t.booking_id, t.name, t.service, t.amount_cents, t.method, t.status, t.created_ms);
     if (t.method === 'interac' || DEMO) {
