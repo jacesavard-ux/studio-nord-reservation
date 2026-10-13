@@ -78,3 +78,5 @@ header h1{background:var(--gold);-webkit-background-clip:text;background-clip:te
 .pm{display:grid;gap:8px;margin:6px 0 4px}.opt{display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid #333;border-radius:10px;background:#181818;cursor:pointer;margin:0}
 .opt input{width:auto;margin:0;accent-color:#1ed760}.opt small{color:#b3b3b3}.opt:has(input:checked){border-color:#d4af37;box-shadow:0 0 0 1px #d4af37}
 .pend{color:#d4af37}.btns{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.btns button{width:auto;padding:8px 14px;margin:0}
+.tips{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0}.tips .tp{flex:1 0 70px;padding:10px 8px;background:var(--card2);border:2px solid transparent;border-radius:8px;text-align:center;cursor:pointer;font-weight:700}.tips .tp small{display:block;color:var(--mute);font-weight:600;font-size:.75rem}.tips .tp.sel{border-color:var(--green);background:#2a2414;color:var(--green2)}
+.qr{background:#fff;padding:10px;border-radius:12px;width:220px;max-width:100%;display:block;margin:10px 0}

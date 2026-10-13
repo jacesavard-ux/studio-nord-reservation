@@ -48,4 +48,26 @@ const book=async(s,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',hea
  ok((await (await fetch(B+'/api/bookings/'+iid2)).json()).deposit===10,'Interac coupe femme: dépôt 10 $');
  await fetch(B+'/api/admin/bookings/'+iid2+'/cancel',{method:'POST',headers:{Authorization:auth}});
  ok((await slots('coupe-homme')).find(x=>x.time==='18:30'),'Admin: « Annuler » libère la plage');
+ // --- Pourboire ---
+ {const T=require('./lib/tips');
+  ok(T.tipCents(25,'15')===375&&T.tipCents(25,'18')===450&&T.tipCents(25,'20')===500,'Pourboire: 15/18/20 % de 25 $ = 3,75/4,50/5,00 $');
+  ok(T.tipCents(30,'18')===540&&T.tipCents(40,'15')===600,'Pourboire: 18 % de 30 $ = 5,40 $, 15 % de 40 $ = 6,00 $');
+  ok(T.tipCents(25,'none')===0&&T.tipCents(25,'')===0&&T.tipCents(25,'12')===0,'Pourboire: aucun / pourcentage non permis = 0');
+  ok(T.tipCents(0,'custom','5,50')===550&&T.tipCents(25,'custom','7')===700&&T.tipCents(25,'custom','-3')===0&&T.tipCents(25,'custom','abc')===0,'Pourboire perso: 5,50 → 550 ¢, négatif/invalide → 0');
+  ok(T.tipCents(25,'custom','99999')===T.MAX_CENTS&&T.fmt(375)==='3,75 $','Pourboire perso plafonné à 500 $ + format 3,75 $');
+  const rb=await (await fetch(B+'/api/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({service:'coupe-femme',start:`2026-10-16T09:00:00.000-04:00`,name:'Tip Test',phone:'514-555-2222',email:'p@ex.com',method:'interac',tip:'20'})})).json();
+  const tb=await (await fetch(B+'/api/bookings/'+new URL(rb.url,B).searchParams.get('id'))).json();
+  ok(tb.tipCents===600&&tb.totalCents===1600,'Réservation Interac + 20 %: pourboire 6 $, total à envoyer 16 $');
+  const pr=await (await fetch(B+'/api/tip-ref/'+tb.ref)).json();ok(pr.service==='Coupe femme'&&pr.price===30,'Page pourboire ?ref= : service et prix préremplis');
+  const t1=await (await fetch(B+'/api/tips',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ref:tb.ref,tip:'15',method:'card'})})).json();
+  const t1d=await (await fetch(B+'/api/tips/'+new URL(t1.url,B).searchParams.get('merci'))).json();ok(t1d.amountCents===450&&t1d.status==='paid','Pourboire après RDV 15 % de 30 $ = 4,50 $ (démo payé)');
+  const t2=await (await fetch(B+'/api/tips',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'Ami',tip:'custom',tipCustom:'10',method:'interac'})})).json();
+  const t2id=new URL(t2.url,B).searchParams.get('merci');ok((await (await fetch(B+'/api/tips/'+t2id)).json()).interacEmail==='jacesavard@gmail.com','Pourboire Interac: instructions jacesavard@gmail.com');
+  ok((await fetch(B+'/api/tips',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tip:'none'})})).status===400,'Pourboire vide refusé');
+  let ad2=await (await fetch(B+'/api/admin/data',{headers:{Authorization:auth}})).json();
+  ok(ad2.tips.length===3&&ad2.tipsTotalCents===450,'Admin: 3 pourboires listés, 4,50 $ reçus');
+  await fetch(B+'/api/admin/tips/'+t2id+'/confirm',{method:'POST',headers:{Authorization:auth}});
+  ad2=await (await fetch(B+'/api/admin/data',{headers:{Authorization:auth}})).json();ok(ad2.tipsTotalCents===1450,'Admin: pourboire Interac confirmé → 14,50 $');
+  const q=await fetch(B+'/api/admin/qr-pourboire.png',{headers:{Authorization:auth}});ok(q.headers.get('content-type')==='image/png'&&(await fetch(B+'/api/admin/qr-pourboire.png')).status===401,'QR PNG admin (protégé)');
+  ok((await fetch(B+'/pourboire')).status===200,'Page /pourboire publique');}
  console.log(`\n${pass} réussis, ${fail} échoués`);})();

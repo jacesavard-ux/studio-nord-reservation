@@ -9,31 +9,35 @@
 <div class="card" id="step3"><h2><span class="n">3</span>Vos coordonnées</h2>
 <form id="f"><label>Nom complet *</label><input name="name" required><label>Téléphone *</label><input name="phone" type="tel" required>
 <label>Courriel *</label><input name="email" type="email" required><label>Note (facultatif)</label><textarea name="note" rows="2" placeholder="Ex.: longueur des cheveux, couleur désirée…"></textarea>
+<label>Pourboire (facultatif) 💛</label><div class="tips" id="tips"></div><input id="tipc" class="hidden" inputmode="decimal" placeholder="Montant en $ (ex.: 5)">
 <label>Mode de paiement du dépôt</label><div class="pm"><label class="opt"><input type="radio" name="method" value="card" checked> 💳 Carte de crédit / débit <small>(confirmation immédiate)</small></label><label class="opt"><input type="radio" name="method" value="interac"> 🏦 Virement Interac <small>(plage retenue 48 h, confirmée à la réception du virement)</small></label></div>
 <div class="sum" id="sum" style="margin-top:14px">Sélectionnez un service et une heure.</div>
 <p class="policy">Un dépôt est payable en ligne (carte ou virement Interac) pour confirmer votre rendez-vous (10 $ pour les coupes et le piercing, 40 $ pour coloration, mèches, décoloration, permanente et botox capillaire). Il est déduit de votre facture; le solde est payable au salon. <b>Le dépôt de 40 $ est non remboursable si vous ne vous présentez pas et n'avisez pas au moins 72 h à l'avance.</b> Prix plus taxes (TPS 5 % + TVQ 9,975 %).</p>
 <div class="player"><div class="in"><div class="info"><b id="pt">Aucun service choisi</b><small id="ps">Choisissez un service et une heure</small></div><button id="pay" disabled>Réserver</button></div></div><div class="err" id="err"></div></form></div>
 </main>
-<script>
-let C,S={};const $=id=>document.getElementById(id);const money=n=>n.toFixed(2).replace('.',',')+' $';
+<script src="/tips.js"></script><script>
+let C,S={tip:'none'};const $=id=>document.getElementById(id);const money=n=>n.toFixed(2).replace('.',',')+' $';
 const priceLabel=s=>s.price?`${s.price} $ + tx`:`à partir de ${s.priceFrom} $ + tx`;
 const dur=m=>m<60?m+' min':Math.floor(m/60)+' h'+(m%60?' '+m%60:'');
 (async()=>{C=await (await fetch('/api/config')).json();if(C.demo)$('demo').classList.remove('hidden');
 if(location.search.includes('annule'))$('err').textContent='Paiement annulé — votre plage n\'a pas été réservée.';
 $('services').innerHTML=C.services.map(s=>`<div class="svc" data-id="${s.id}"><div><b>${s.name}</b><small>${dur(s.duration)}${s.priceNote?' · '+s.priceNote:''} · dépôt ${s.deposit} $</small></div><div class="p">${priceLabel(s)}</div></div>`).join('');
-document.querySelectorAll('.svc').forEach(el=>el.onclick=()=>{document.querySelectorAll('.svc').forEach(e=>e.classList.remove('sel'));el.classList.add('sel');S.service=C.services.find(s=>s.id==el.dataset.id);S.slot=null;loadSlots();upd()});
+document.querySelectorAll('.svc').forEach(el=>el.onclick=()=>{document.querySelectorAll('.svc').forEach(e=>e.classList.remove('sel'));el.classList.add('sel');S.service=C.services.find(s=>s.id==el.dataset.id);S.slot=null;loadSlots();renderTips();upd()});
 const d=new Date(),days=[];for(let i=0;i<C.horizon;i++){const x=new Date(d.getFullYear(),d.getMonth(),d.getDate()+i);const wd=x.getDay()||7;if(C.openDays.includes(wd))days.push(x)}
 $('days').innerHTML=days.map(x=>{const iso=x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');return `<div class="day" data-d="${iso}"><small>${x.toLocaleDateString('fr-CA',{weekday:'short'})}</small><b>${x.getDate()}</b><small>${x.toLocaleDateString('fr-CA',{month:'short'})}</small></div>`}).join('');
 document.querySelectorAll('.day').forEach(el=>el.onclick=()=>{document.querySelectorAll('.day').forEach(e=>e.classList.remove('sel'));el.classList.add('sel');S.date=el.dataset.d;S.slot=null;loadSlots();upd()});
-document.querySelector('.day')?.click();})();
+document.querySelector('.day')?.click();renderTips();})();
+function renderTips(){const s=S.service,b=s?(s.price||s.priceFrom):0;$('tips').innerHTML=[['none','Aucun',''],...Tips.PCTS.map(p=>[String(p),p+' %',b?money(Tips.tipCents(b,String(p))/100):'']),['custom','Autre','montant']].map(([v,l,x])=>`<div class="tp ${S.tip===v?'sel':''}" data-v="${v}">${l}<small>${x||'&nbsp;'}</small></div>`).join('');
+document.querySelectorAll('.tp').forEach(el=>el.onclick=()=>{S.tip=el.dataset.v;$('tipc').classList.toggle('hidden',S.tip!=='custom');renderTips();upd()})}
+$('tipc').oninput=()=>upd();document.querySelectorAll('input[name=method]').forEach(r=>r.onchange=()=>upd());
 async function loadSlots(){if(!S.service||!S.date)return;const r=await (await fetch(`/api/slots?service=${S.service.id}&date=${S.date}`)).json();
 $('slots').innerHTML=r.length?r.map(x=>`<div class="slot ${x.inGap?'gap':''}" data-s="${x.start}" title="${x.inGap?'Pendant un temps de pause':''}">${x.time.replace(':',' h ')}</div>`).join(''):'<p class="muted">Aucune disponibilité ce jour-là.</p>';
 $('gapnote').textContent=r.some(x=>x.inGap)?'Les plages en pointillé sont offertes pendant le temps de pause d\'un autre client.':'';
 document.querySelectorAll('.slot').forEach(el=>el.onclick=()=>{document.querySelectorAll('.slot').forEach(e=>e.classList.remove('sel'));el.classList.add('sel');S.slot=el.dataset.s;upd()})}
 function upd(){const s=S.service;$('pay').disabled=!(s&&S.slot);if(!s)return;$('pt').textContent=s.name;$('ps').textContent=S.slot?new Date(S.slot).toLocaleString('fr-CA',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',timeZone:C.tz})+' · dépôt '+s.deposit+' $':'Choisissez une heure';
-const base=s.price||s.priceFrom,tx=base*(C.taxes.TPS+C.taxes.TVQ);const when=S.slot?new Date(S.slot).toLocaleString('fr-CA',{weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit',timeZone:C.tz}):'—';
-$('sum').innerHTML=`<b>${s.name}</b> (${dur(s.duration)})<br>Quand : ${when}<br>Prix estimé : ${s.price?'':'à partir de '}${money(base)} + taxes = ${s.price?'':'≈ '}${money(base+tx)}<br><b>Dépôt à payer maintenant : ${money(s.deposit)}</b>`}
+const base=s.price||s.priceFrom,tip=Tips.tipCents(base,S.tip,$('tipc').value),tx=base*(C.taxes.TPS+C.taxes.TVQ);const when=S.slot?new Date(S.slot).toLocaleString('fr-CA',{weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit',timeZone:C.tz}):'—';
+$('sum').innerHTML=`<b>${s.name}</b> (${dur(s.duration)})<br>Quand : ${when}<br>Prix estimé : ${s.price?'':'à partir de '}${money(base)} + taxes = ${s.price?'':'≈ '}${money(base+tx)}${tip?`<br>Pourboire : ${money(tip/100)}${s.price?'':' (calculé sur le prix de base)'}`:''}<br><b>${tip?'Total à payer maintenant (dépôt + pourboire)':'Dépôt à payer maintenant'} : ${money(s.deposit+tip/100)}</b>${document.querySelector('input[name=method]:checked')?.value==='interac'?'<br><small>Montant du virement Interac à envoyer</small>':''}`}
 $('f').onsubmit=async e=>{e.preventDefault();$('err').textContent='';$('pay').disabled=true;const fd=Object.fromEntries(new FormData(e.target));
-const r=await fetch('/api/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...fd,service:S.service.id,start:S.slot})});const j=await r.json();
+const r=await fetch('/api/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...fd,service:S.service.id,start:S.slot,tip:S.tip,tipCustom:$('tipc').value})});const j=await r.json();
 if(j.url)location=j.url;else{$('err').textContent=j.error;$('pay').disabled=false;loadSlots()}};
 </script></body></html>

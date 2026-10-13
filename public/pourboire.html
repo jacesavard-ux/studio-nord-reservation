@@ -1,0 +1,28 @@
+<!doctype html><html lang="fr-CA"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pourboire · Jace Savard Studio Nord</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet"><meta name="theme-color" content="#000000"><link rel="stylesheet" href="/style.css"></head><body>
+<header><img class="cover" src="/cover-banner.jpg" alt="Studio Nord — 331 rue Richard, Joliette"><a class="brand" href="/"><img src="/logo.jpg" alt="Logo Studio Nord"><div><div class="nm">Jace Savard Studio Nord</div><small>331 rue Richard, Joliette</small></div></a><h1>Laisser un pourboire</h1><p>Merci de votre visite! 💛</p></header>
+<main><div id="demo" class="demo hidden">⚠️ <b>Mode démo</b> — aucun vrai paiement ne sera effectué.</div>
+<div class="card" id="c"><form id="f">
+<div id="pre" class="sum hidden" style="margin-bottom:12px"></div>
+<div id="manual"><label>Votre prénom (facultatif)</label><input name="name"><label>Service reçu (facultatif)</label><input name="service" placeholder="Ex.: coupe homme"><label>Prix du service ($) — pour calculer le %</label><input name="price" id="price" inputmode="decimal" placeholder="Ex.: 25"></div>
+<label>Pourboire</label><div class="tips" id="tips"></div><input id="tipc" class="hidden" inputmode="decimal" placeholder="Montant en $ (ex.: 5)">
+<label>Mode de paiement</label><div class="pm"><label class="opt"><input type="radio" name="method" value="card" checked> 💳 Carte de crédit / débit</label><label class="opt"><input type="radio" name="method" value="interac"> 🏦 Virement Interac</label></div>
+<div class="sum" id="sum" style="margin-top:14px">Choisissez un pourboire.</div>
+<div class="player"><div class="in"><div class="info"><b>Pourboire</b><small id="ps">—</small></div><button id="pay" disabled>Envoyer</button></div></div><div class="err" id="err"></div></form></div></main>
+<script src="/tips.js"></script><script>
+const $=id=>document.getElementById(id),q=new URLSearchParams(location.search),money=c=>Tips.fmt(c);let S={tip:'none',base:0,ref:null};
+const total=()=>Tips.tipCents(S.ref?S.base:Number(($('price').value||'0').replace(',','.')),S.tip,$('tipc').value);
+function render(){const b=S.ref?S.base:Number(($('price').value||'0').replace(',','.'));$('tips').innerHTML=[['none','Aucun',''],...Tips.PCTS.map(p=>[String(p),p+' %',b>0?money(Tips.tipCents(b,String(p))):'']),['custom','Autre','montant']].map(([v,l,x])=>`<div class="tp ${S.tip===v?'sel':''}" data-v="${v}">${l}<small>${x||'&nbsp;'}</small></div>`).join('');
+document.querySelectorAll('.tp').forEach(el=>el.onclick=()=>{S.tip=el.dataset.v;$('tipc').classList.toggle('hidden',S.tip!=='custom');render()});upd()}
+function upd(){const t=total(),ia=document.querySelector('input[name=method]:checked').value==='interac';$('pay').disabled=t<100;$('ps').textContent=t?money(t):'—';
+$('sum').innerHTML=t?`<b>Pourboire : ${money(t)}</b><br>${ia?'Vous verrez les instructions de virement Interac à l\'étape suivante.':'Paiement sécurisé par carte (Stripe).'}`:(S.tip!=='none'&&S.tip!=='custom'&&!S.ref?'Entrez le prix du service pour calculer le %, ou choisissez « Autre ».':'Choisissez un pourboire.')}
+$('price').oninput=render;$('tipc').oninput=upd;document.querySelectorAll('input[name=method]').forEach(r=>r.onchange=upd);
+(async()=>{const C=await (await fetch('/api/config')).json();if(C.demo)$('demo').classList.remove('hidden');
+if(q.get('merci')){const t=await (await fetch('/api/tips/'+q.get('merci'))).json();$('c').innerHTML=t.status==='paid'?`<h2 class="ok">✅ Merci pour votre pourboire!</h2><div class="sum">Montant : <b>${money(t.amountCents)}</b>${t.demo?' <i>(simulation)</i>':''}</div><p class="policy">Au plaisir de vous revoir chez <b>Jace Savard Studio Nord</b>! 💛</p><a href="/">Prendre un rendez-vous</a>`
+:t.status==='interac'?`<h2 class="pend">🏦 Envoyez votre pourboire par Interac</h2><ol class="policy"><li>Montant : <b>${money(t.amountCents)}</b></li><li>Destinataire : <b>${t.interacEmail}</b></li><li>Message : « Pourboire ${t.ref} »</li></ol><p class="policy">Merci beaucoup! 💛</p>`
+:`<h2>Paiement non complété</h2><a href="/pourboire">Réessayer</a>`;return}
+if(q.get('annule'))$('err').textContent='Paiement annulé.';
+const r=q.get('ref');if(r){const j=await fetch('/api/tip-ref/'+encodeURIComponent(r));if(j.ok){const b=await j.json();S.ref=b.ref;S.base=b.price;$('manual').classList.add('hidden');$('pre').classList.remove('hidden');$('pre').innerHTML=`Merci <b>${b.name}</b>!<br>${b.service} · ${b.priceFrom?'à partir de ':''}${b.price} $ <small>(réservation ${b.ref})</small>`}}
+render()})();
+$('f').onsubmit=async e=>{e.preventDefault();$('err').textContent='';$('pay').disabled=true;const fd=Object.fromEntries(new FormData(e.target));
+const res=await fetch('/api/tips',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...fd,ref:S.ref,tip:S.tip,tipCustom:$('tipc').value})});const j=await res.json();if(j.url)location=j.url;else{$('err').textContent=j.error;$('pay').disabled=false}};
+</script></body></html>
