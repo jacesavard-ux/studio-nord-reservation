@@ -7,3 +7,5 @@ screenshots/
 .env.*
 /tmp
 *.log
+.admin_pw
+sync-state.json
