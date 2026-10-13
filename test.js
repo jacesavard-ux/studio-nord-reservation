@@ -4,7 +4,7 @@ const slots=async s=>(await (await fetch(`${B}/api/slots?service=${s}&date=${D}`
 const book=async(s,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({service:s,start:`${D}T${t}:00.000-04:00`,name:'Test '+s,phone:'514-555-0000',email:'t@ex.com'})});const j=await r.json();
  if(j.url){const id=new URL(j.url,B).searchParams.get('id');await fetch(B+'/api/demo-pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});return (await (await fetch(B+'/api/bookings/'+id)).json()).status}return 'REFUSÉ: '+j.error};
 (async()=>{if(!(await (await fetch(B+'/api/config')).json()).demo){console.log('Arrêt: le serveur doit tourner en mode démo (sans STRIPE_SECRET_KEY) pour les tests.');process.exit(1)}
- ok((await slots('coupe-homme')).length===22,'22 plages coupe 8h30-19h00 mercredi');
+ ok((await slots('coupe-homme')).length===20,'20 plages coupe 8h30-19h00 mercredi (sans dîner 12h-13h)');
  ok((await (await fetch(`${B}/api/slots?service=coupe-homme&date=2026-10-12`)).json()).length===0,'Lundi fermé');
  ok((await slots('coloration-meches')).at(-1).time==='15:30','Dernière plage mèches 15h30 (fin 19h30)');
  ok(await book('coupe-homme','08:30')==='confirmed','Coupe homme 8h30 réservée');
@@ -16,9 +16,15 @@ const book=async(s,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',hea
  ok((await book('permanente','10:30')).startsWith('REFUSÉ'),'Permanente chevauchant pause refusée');
  ok(await book('coupe-enfant','10:30')==='confirmed','Coupe enfant réservée dans la pause 10h30');
  ok((await book('coupe-homme','10:30')).startsWith('REFUSÉ'),'Pause déjà prise: 2e coupe bloquée');
- ok(await book('coupe-homme','13:00')==='confirmed','Coupe 13h00 réservée');
- ok((await book('coloration-deco','12:30')).startsWith('REFUSÉ'),'Déco 12h30 refusée (13h00 occupée, pause à 13h30)');
- ok(await book('coloration-meches','12:00')==='confirmed','Mèches 12h00 réservée (sa pause 13h00 contient la coupe existante)');
+ ok(await book('coupe-homme','14:00')==='confirmed','Coupe 14h00 réservée');
+ ok((await book('coloration-deco','13:30')).startsWith('REFUSÉ'),'Déco 13h30 refusée (14h00 occupée, pause à 14h30)');
+ ok(await book('coloration-meches','13:00')==='confirmed','Mèches 13h00 réservée (sa pause 14h00 contient la coupe existante)');
+ // --- Pause dîner 12h-13h ---
+ {const d2=async sv=>(await (await fetch(`${B}/api/slots?service=${sv}&date=2026-10-16`)).json()).map(x=>x.time);
+  const ch=await d2('coupe-homme'),co=await d2('coloration');
+  ok(!ch.includes('12:00')&&!ch.includes('12:30')&&ch.includes('11:30')&&ch.includes('13:00'),'Dîner: aucune coupe 12h00/12h30 (11h30 et 13h00 offertes)');
+  ok(!co.includes('10:30')&&!co.includes('11:30')&&!co.includes('12:00')&&co.includes('10:00')&&co.includes('13:00'),'Dîner: coloration ne chevauche pas 12h-13h');
+  ok((await book('coupe-homme','12:00')).startsWith('REFUSÉ')&&(await book('piercing','12:30')).startsWith('REFUSÉ'),'Dîner: réservation directe 12h00/12h30 refusée');}
  const auth='Basic '+Buffer.from('jace:test123').toString('base64');
  ok((await fetch(B+'/api/admin/data')).status===401,'Admin sans mot de passe refusé');
  await fetch(B+'/api/admin/blocks',{method:'POST',headers:{'Content-Type':'application/json',Authorization:auth},body:JSON.stringify({date:D,from:'17:00',to:'18:00',reason:'Pause'})});
