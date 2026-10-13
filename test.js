@@ -70,4 +70,16 @@ const book=async(s,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',hea
   ad2=await (await fetch(B+'/api/admin/data',{headers:{Authorization:auth}})).json();ok(ad2.tipsTotalCents===1450,'Admin: pourboire Interac confirmé → 14,50 $');
   const q=await fetch(B+'/api/admin/qr-pourboire.png',{headers:{Authorization:auth}});ok(q.headers.get('content-type')==='image/png'&&(await fetch(B+'/api/admin/qr-pourboire.png')).status===401,'QR PNG admin (protégé)');
   ok((await fetch(B+'/pourboire')).status===200,'Page /pourboire publique');}
+ // --- Taxes ---
+ {const X=require('./lib/taxes');const a=X.compute(2500);
+  ok(a.tps===125&&a.tvq===249&&a.total===2874,'Taxes: 25 $ → TPS 1,25, TVQ 2,49, total 28,74 $');
+  const b2=X.compute(3000);ok(b2.tps===150&&b2.tvq===299&&b2.total===3449,'Taxes: 30 $ → TPS 1,50, TVQ 2,99, total 34,49 $');
+  const c2=X.compute(4000);ok(c2.tps===200&&c2.tvq===399&&c2.total===4599,'Taxes: 40 $ → total 45,99 $');
+  ok(X.balance(2500,1000)===1874&&X.balance(0,1000)===0,'Solde au salon 25 $ dépôt 10 $ = 18,74 $');
+  const rb=await (await fetch(B+'/api/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({service:'coupe-homme',start:`2026-10-16T15:00:00.000-04:00`,name:'Tax Test',phone:'514-555-3333',email:'x@ex.com',method:'interac',tip:'15'})})).json();
+  const tb=await (await fetch(B+'/api/bookings/'+new URL(rb.url,B).searchParams.get('id'))).json();
+  ok(tb.tpsCents===125&&tb.tvqCents===249&&tb.totalTaxInclCents===2874&&tb.balanceCents===1874&&tb.tpsNo==='774132096 RT0001'&&tb.tvqNo==='4027999251 TQ0002','Réservation: taxes stockées, total 28,74, solde 18,74, numéros de taxes');
+  ok(tb.tipCents===375&&tb.totalCents===1375,'Pourboire non taxé (15 % de 25 $ = 3,75) et dépôt inchangé (Interac 13,75 $)');
+  const ad3=await (await fetch(B+'/api/admin/data',{headers:{Authorization:auth}})).json();ok(ad3.interac.some(x=>x.tps_cents===125&&x.tvq_cents===249&&x.totalTaxInclCents===2874),'Admin: taxes dans le détail des réservations');
+  const pr=await (await fetch(B+'/api/tip-ref/'+tb.ref)).json();ok(pr.tps===125&&pr.total===2874,'Page pourboire: taxes du prix affiché');}
  console.log(`\n${pass} réussis, ${fail} échoués`);})();

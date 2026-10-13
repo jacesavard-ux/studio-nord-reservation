@@ -7,6 +7,7 @@ const cfg = require('./lib/config');
 const { availableSlots, steps, conflicts, existingSteps, svc } = require('./lib/slots');
 const calendar = require('./lib/calendar');
 const Tips = require('./lib/tips');
+const Taxes = require('./lib/taxes');
 const QRCode = require('qrcode');
 const TIP_URL = 'https://reservation.jacesavard.com/pourboire';
 
@@ -22,18 +23,19 @@ db.exec(`CREATE TABLE IF NOT EXISTS bookings (id TEXT PRIMARY KEY, service_id TE
   name TEXT, phone TEXT, email TEXT, note TEXT, deposit INTEGER, status TEXT, stripe_session TEXT, calendar_event_id TEXT, created_ms INTEGER);
   CREATE TABLE IF NOT EXISTS blocks (id INTEGER PRIMARY KEY AUTOINCREMENT, start_ms INTEGER, end_ms INTEGER, reason TEXT);
   CREATE TABLE IF NOT EXISTS tips (id TEXT PRIMARY KEY, booking_id TEXT, name TEXT, service TEXT, amount_cents INTEGER, method TEXT, status TEXT, stripe_session TEXT, created_ms INTEGER);`);
-try { db.exec('ALTER TABLE bookings ADD COLUMN tip_cents INTEGER DEFAULT 0'); } catch (e) { /* colonne déjà là */ }
+for (const col of ['tip_cents', 'tps_cents', 'tvq_cents']) { try { db.exec(`ALTER TABLE bookings ADD COLUMN ${col} INTEGER DEFAULT 0`); } catch (e) { /* colonne déjà là */ } }
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.get('/taxes.js', (req, res) => res.type('js').sendFile(path.join(__dirname, 'lib/taxes.js')));
 app.get('/tips.js', (req, res) => res.type('js').sendFile(path.join(__dirname, 'lib/tips.js')));
 app.get('/pourboire', (req, res) => res.sendFile(path.join(__dirname, 'public/pourboire.html')));
 const basePrice = s => s.price || s.priceFrom || 0;
 
 app.get('/api/config', (req, res) => res.json({ salonName: cfg.salonName, services: cfg.services, openDays: cfg.openDays,
-  open: cfg.open, close: cfg.close, horizon: cfg.bookingHorizonDays, taxes: cfg.taxes, demo: DEMO, tz: cfg.timezone }));
+  open: cfg.open, close: cfg.close, horizon: cfg.bookingHorizonDays, taxes: { TPS: Taxes.TPS_RATE, TVQ: Taxes.TVQ_RATE, tpsNo: Taxes.TPS_NO, tvqNo: Taxes.TVQ_NO }, demo: DEMO, tz: cfg.timezone }));
 app.get('/api/slots', (req, res) => res.json(availableSlots(db, req.query.service, req.query.date)));
 
 const INTERAC_EMAIL = process.env.INTERAC_EMAIL || 'jacesavard@gmail.com';
@@ -45,7 +47,7 @@ const createPending = db.transaction(b => {
   const day = DateTime.fromMillis(b.start_ms, { zone: cfg.timezone }).startOf('day');
   const ok = availableSlots(db, b.service_id, day.toISODate()).some(s => DateTime.fromISO(s.start).toMillis() === b.start_ms);
   if (!ok) throw new Error('Cette plage n\'est plus disponible.');
-  db.prepare(`INSERT INTO bookings (id,service_id,start_ms,end_ms,name,phone,email,note,deposit,status,created_ms,tip_cents) VALUES (@id,@service_id,@start_ms,@end_ms,@name,@phone,@email,@note,@deposit,@status,@created_ms,@tip_cents)`).run(b);
+  db.prepare(`INSERT INTO bookings (id,service_id,start_ms,end_ms,name,phone,email,note,deposit,status,created_ms,tip_cents,tps_cents,tvq_cents) VALUES (@id,@service_id,@start_ms,@end_ms,@name,@phone,@email,@note,@deposit,@status,@created_ms,@tip_cents,@tps_cents,@tvq_cents)`).run(b);
 });
 
 app.post('/api/bookings', async (req, res) => {
@@ -56,7 +58,8 @@ app.post('/api/bookings', async (req, res) => {
     const start_ms = DateTime.fromISO(start).toMillis();
     const b = { id: crypto.randomUUID(), service_id: s.id, start_ms, end_ms: start_ms + s.duration * 60000, name: name.trim(), phone: phone.trim(),
       email: email.trim(), note: (note || '').trim().slice(0, 500), deposit: s.deposit, created_ms: Date.now(), tip_cents: 0, status: method === 'interac' ? 'interac' : 'pending' };
-    b.tip_cents = Tips.tipCents(basePrice(s), tip, tipCustom);
+    b.tip_cents = Tips.tipCents(basePrice(s), tip, tipCustom); // pourboire sur le prix avant taxes, non taxé
+    const tx = Taxes.compute(basePrice(s) * 100); b.tps_cents = tx.tps; b.tvq_cents = tx.tvq;
     createPending(b);
     if (b.status === 'interac') return res.json({ url: `/confirmation.html?id=${b.id}` });
     if (DEMO) return res.json({ url: `/paiement-demo.html?id=${b.id}` });
@@ -97,8 +100,17 @@ app.get('/api/bookings/:id', async (req, res) => {
   const s = svc(b.service_id);
   let status = b.status;
   if (status === 'interac' && b.created_ms < Date.now() - INTERAC_HOLD_H * 3600000) status = 'expired';
-  res.json({ ref: ref(b.id), interacEmail: INTERAC_EMAIL, holdHours: INTERAC_HOLD_H, expiresAt: fmt(b.created_ms + INTERAC_HOLD_H * 3600000), service: s.name, when: fmt(b.start_ms), name: b.name, email: b.email, deposit: b.deposit, tipCents: b.tip_cents || 0, totalCents: b.deposit * 100 + (b.tip_cents || 0), status, demo: DEMO, priceNote: s.priceNote || `${s.price} $` });
+  res.json({ ref: ref(b.id), interacEmail: INTERAC_EMAIL, holdHours: INTERAC_HOLD_H, expiresAt: fmt(b.created_ms + INTERAC_HOLD_H * 3600000), service: s.name, when: fmt(b.start_ms), name: b.name, email: b.email, deposit: b.deposit, tipCents: b.tip_cents || 0, totalCents: b.deposit * 100 + (b.tip_cents || 0), status, demo: DEMO, priceNote: s.priceNote || `${s.price} $`, ...taxInfo(b, s) });
 });
+
+// Taxes d'un rendez-vous (montants stockés; recalculés pour les anciennes réservations)
+function taxInfo(b, s) {
+  const sub = basePrice(s) * 100;
+  const tps = b.tps_cents || Taxes.compute(sub).tps, tvq = b.tvq_cents || Taxes.compute(sub).tvq;
+  const total = sub + tps + tvq;
+  return { priceFrom: !s.price, subtotalCents: sub, tpsCents: tps, tvqCents: tvq, totalTaxInclCents: total,
+    balanceCents: Math.max(0, total - b.deposit * 100), tpsNo: Taxes.TPS_NO, tvqNo: Taxes.TVQ_NO };
+}
 
 // --- Pourboire après le rendez-vous ---
 app.get('/api/tip-ref/:ref', (req, res) => {
@@ -107,7 +119,7 @@ app.get('/api/tip-ref/:ref', (req, res) => {
   const b = db.prepare('SELECT * FROM bookings WHERE substr(id,1,8)=?').get(r);
   if (!b) return res.status(404).json({ error: 'Introuvable' });
   const s = svc(b.service_id);
-  res.json({ ref: ref(b.id), name: b.name.split(' ')[0], service: s.name, price: basePrice(s), priceFrom: !s.price });
+  res.json({ ref: ref(b.id), name: b.name.split(' ')[0], service: s.name, price: basePrice(s), priceFrom: !s.price, ...Taxes.compute(basePrice(s) * 100) });
 });
 app.post('/api/tips', async (req, res) => {
   try {
@@ -166,9 +178,9 @@ app.get('/api/admin/data', auth, (req, res) => {
   res.json({
     tips, tipsTotalCents: tips.filter(t => t.status === 'paid').reduce((a, t) => a + t.amount_cents, 0),
     interac: db.prepare("SELECT * FROM bookings WHERE status='interac' AND created_ms > ? AND end_ms > ? ORDER BY start_ms").all(holdCut, now)
-      .map(b => ({ ...b, ref: ref(b.id), service: svc(b.service_id).name, when: fmt(b.start_ms), expires: fmt(b.created_ms + INTERAC_HOLD_H * 3600000) })),
+      .map(b => ({ ...b, ...taxInfo(b, svc(b.service_id)), ref: ref(b.id), service: svc(b.service_id).name, when: fmt(b.start_ms), expires: fmt(b.created_ms + INTERAC_HOLD_H * 3600000) })),
     bookings: db.prepare("SELECT * FROM bookings WHERE status='confirmed' AND end_ms > ? ORDER BY start_ms").all(now)
-      .map(b => ({ ...b, ref: ref(b.id), service: svc(b.service_id).name, when: fmt(b.start_ms) })),
+      .map(b => ({ ...b, ...taxInfo(b, svc(b.service_id)), ref: ref(b.id), service: svc(b.service_id).name, when: fmt(b.start_ms) })),
     blocks: db.prepare('SELECT * FROM blocks WHERE end_ms > ? ORDER BY start_ms').all(now).map(b => ({ ...b, from: fmt(b.start_ms), to: fmt(b.end_ms) })),
   });
 });
