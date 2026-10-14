@@ -1,4 +1,4 @@
-const B='http://localhost:3000',D='2026-10-14';let pass=0,fail=0;
+const B='http://localhost:3000',D='2026-10-21';let pass=0,fail=0;
 const ok=(c,m)=>{console.log((c?'✅':'❌')+' '+m);c?pass++:fail++};
 const slots=async s=>(await (await fetch(`${B}/api/slots?service=${s}&date=${D}`)).json());
 const book=async(s,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({service:s,start:`${D}T${t}:00.000-04:00`,name:'Test '+s,phone:'514-555-0000',email:'t@ex.com'})});const j=await r.json();
@@ -23,7 +23,7 @@ const book=async(s,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',hea
  {const d2=async sv=>(await (await fetch(`${B}/api/slots?service=${sv}&date=2026-10-16`)).json()).map(x=>x.time);
   const ch=await d2('coupe-homme'),co=await d2('coloration');
   ok(!ch.includes('12:00')&&!ch.includes('12:30')&&ch.includes('11:30')&&ch.includes('13:00'),'Dîner: aucune coupe 12h00/12h30 (11h30 et 13h00 offertes)');
-  ok(!co.includes('10:30')&&!co.includes('11:30')&&!co.includes('12:00')&&co.includes('10:00')&&co.includes('13:00'),'Dîner: coloration ne chevauche pas 12h-13h');
+  ok(co.includes('10:30')&&co.includes('11:30')&&!co.includes('12:00')&&!co.includes('12:30')&&co.includes('13:00'),'Dîner: coloration peut empiéter sur 12h-13h mais pas commencer pendant');
   ok((await book('coupe-homme','12:00')).startsWith('REFUSÉ')&&(await book('piercing','12:30')).startsWith('REFUSÉ'),'Dîner: réservation directe 12h00/12h30 refusée');}
  const auth='Basic '+Buffer.from('jace:test123').toString('base64');
  ok((await fetch(B+'/api/admin/data')).status===401,'Admin sans mot de passe refusé');
