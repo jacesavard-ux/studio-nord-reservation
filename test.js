@@ -99,4 +99,14 @@ const book=async(s,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',hea
   ok(tb.tipCents===375&&tb.totalCents===1375,'Pourboire non taxé (15 % de 25 $ = 3,75) et dépôt inchangé (Interac 13,75 $)');
   const ad3=await (await fetch(B+'/api/admin/data',{headers:{Authorization:auth}})).json();ok(ad3.interac.some(x=>x.tps_cents===125&&x.tvq_cents===249&&x.totalTaxInclCents===2874),'Admin: taxes dans le détail des réservations');
   const pr=await (await fetch(B+'/api/tip-ref/'+tb.ref)).json();ok(pr.tps===125&&pr.total===2874,'Page pourboire: taxes du prix affiché');}
+ // --- Connexion admin (cookie + Basic) ---
+ {const lp=await fetch(B+'/admin');const h=await lp.text();ok(lp.status===200&&h.includes('name="password"'),'Admin: page de connexion sans auth');
+  const bad=await fetch(B+'/admin/login',{method:'POST',redirect:'manual',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'password=nope'});ok(!bad.headers.get('set-cookie')&&bad.headers.get('location').includes('erreur'),'Admin: mauvais mot de passe refusé');
+  const lg=async p=>(await fetch(B+'/admin/login',{method:'POST',redirect:'manual',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'password='+encodeURIComponent(p)})).headers.get('set-cookie');
+  const ck=await lg('test123');ok(/HttpOnly/.test(ck)&&/Max-Age=15552000/.test(ck),'Admin: connexion pose un cookie HttpOnly 180 jours');
+  ok(!!(await lg(' test123$ ')),'Admin: mot de passe accepté avec $ final et espaces');
+  const c=ck.split(';')[0];ok((await fetch(B+'/api/admin/data',{headers:{Cookie:c}})).status===200&&(await (await fetch(B+'/admin',{headers:{Cookie:c}})).text()).includes('Déconnexion'),'Admin: cookie donne accès (page + API)');
+  ok((await fetch(B+'/api/admin/data',{headers:{Cookie:c.slice(0,-2)+'xx'}})).status===401,'Admin: cookie falsifié refusé');
+  ok((await fetch(B+'/api/admin/data',{headers:{Authorization:'Basic '+Buffer.from('x:test123$').toString('base64')}})).status===200,'Admin: Basic auth (routine) toujours OK, avec ou sans $');
+  ok(/Max-Age=0/.test((await fetch(B+'/admin/logout',{redirect:'manual',headers:{Cookie:c}})).headers.get('set-cookie')),'Admin: déconnexion efface le cookie');}
  console.log(`\n${pass} réussis, ${fail} échoués`);})();

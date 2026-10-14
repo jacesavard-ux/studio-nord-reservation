@@ -171,14 +171,45 @@ app.get('/api/tips/:id', async (req, res) => {
 });
 
 // --- Admin ---
-const auth = (req, res, next) => {
-  const h = req.headers.authorization || '';
-  const dec = Buffer.from(h.split(' ')[1] || '', 'base64').toString();
-  const p = dec.slice(dec.indexOf(':') + 1).trim();
-  if (ADMIN_PASSWORD && dec.includes(':') && p === ADMIN_PASSWORD) return next();
-  res.set('WWW-Authenticate', 'Basic realm="admin"').status(401).send('Authentification requise');
+const normPw = p => String(p || '').trim().replace(/\$+$/, '');
+const ADMIN_PW_N = normPw(ADMIN_PASSWORD);
+const pwOk = p => !!ADMIN_PW_N && crypto.timingSafeEqual(crypto.createHash('sha256').update(normPw(p)).digest(), crypto.createHash('sha256').update(ADMIN_PW_N).digest());
+const SESSION_DAYS = 180, COOKIE = 'sn_admin';
+const SESSION_SECRET = crypto.createHash('sha256').update('studio-nord-session:' + ADMIN_PW_N).digest();
+const signSession = exp => exp + '.' + crypto.createHmac('sha256', SESSION_SECRET).update(String(exp)).digest('base64url');
+const sessionOk = req => {
+  const m = (req.headers.cookie || '').match(new RegExp('(?:^|;\\s*)' + COOKIE + '=([^;]+)'));
+  if (!m || !ADMIN_PW_N) return false;
+  const [exp] = m[1].split('.'); const good = signSession(exp);
+  return good.length === m[1].length && crypto.timingSafeEqual(Buffer.from(good), Buffer.from(m[1])) && Number(exp) > Date.now();
 };
-app.get('/admin', auth, (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
+const basicOk = req => {
+  const h = req.headers.authorization || '';
+  if (!/^Basic /i.test(h)) return false;
+  const dec = Buffer.from(h.split(' ')[1] || '', 'base64').toString();
+  return dec.includes(':') && pwOk(dec.slice(dec.indexOf(':') + 1));
+};
+const setSession = (req, res) => {
+  const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.set('Set-Cookie', `${COOKIE}=${signSession(Date.now() + SESSION_DAYS * 86400000)}; Path=/; Max-Age=${SESSION_DAYS * 86400}; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`);
+};
+const auth = (req, res, next) => {
+  if (sessionOk(req) || basicOk(req)) return next();
+  if (req.headers.authorization) res.set('WWW-Authenticate', 'Basic realm="admin"');
+  res.status(401).json({ error: 'Authentification requise' });
+};
+app.get('/admin', (req, res) => {
+  if (sessionOk(req)) return res.sendFile(path.join(__dirname, 'admin.html'));
+  if (basicOk(req)) { setSession(req, res); return res.sendFile(path.join(__dirname, 'admin.html')); }
+  res.sendFile(path.join(__dirname, 'login.html'));
+});
+app.post('/admin/login', (req, res) => {
+  if (pwOk(req.body && req.body.password)) { setSession(req, res); return res.redirect(303, '/admin'); }
+  res.redirect(303, '/admin?erreur=1');
+});
+app.get('/admin/logout', (req, res) => {
+  res.set('Set-Cookie', `${COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`); res.redirect(303, '/admin');
+});
 app.get('/api/admin/data', auth, (req, res) => {
   const now = Date.now() - 86400000;
   const holdCut = Date.now() - INTERAC_HOLD_H * 3600000;

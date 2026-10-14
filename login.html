@@ -1,0 +1,7 @@
+<!doctype html><html lang="fr-CA"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connexion · Studio Nord</title><meta name="theme-color" content="#000000"><link rel="stylesheet" href="/style.css">
+<style>body{background:#000}.lg{max-width:380px;margin:40px auto;padding:28px;border:1px solid #d4af37;border-radius:14px;background:#0b1f17;color:#fff;text-align:center}.lg img{width:90px;border-radius:50%;border:2px solid #d4af37}.lg h1{color:#d4af37;font-size:1.4em}.lg input{width:100%;box-sizing:border-box;padding:14px;font-size:18px;border-radius:8px;border:1px solid #d4af37;margin:10px 0}.lg button{width:100%;padding:14px;font-size:18px;font-weight:700;background:#d4af37;color:#000;border:0;border-radius:8px}.err{color:#ff8a8a}</style></head><body>
+<div class="lg"><img src="/logo.jpg" alt="Studio Nord"><h1>Administration</h1><p>Jace Savard Studio Nord</p>
+<p class="err" id="e" hidden>Mot de passe incorrect. Réessaie.</p>
+<form method="post" action="/admin/login"><input type="password" name="password" placeholder="Mot de passe" autocomplete="current-password" required autofocus><button>Se connecter</button></form>
+<p><small>Tu restes connecté 6 mois sur cet appareil.</small></p></div>
+<script>if(location.search.includes('erreur'))document.getElementById('e').hidden=false</script></body></html>
