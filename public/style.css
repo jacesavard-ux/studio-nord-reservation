@@ -80,3 +80,18 @@ header h1{background:var(--gold);-webkit-background-clip:text;background-clip:te
 .pend{color:#d4af37}.btns{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.btns button{width:auto;padding:8px 14px;margin:0}
 .tips{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0}.tips .tp{flex:1 0 70px;padding:10px 8px;background:var(--card2);border:2px solid transparent;border-radius:8px;text-align:center;cursor:pointer;font-weight:700}.tips .tp small{display:block;color:var(--mute);font-weight:600;font-size:.75rem}.tips .tp.sel{border-color:var(--green);background:#2a2414;color:var(--green2)}
 .qr{background:#fff;padding:10px;border-radius:12px;width:220px;max-width:100%;display:block;margin:10px 0}
+
+/* Deux agendas: Homme / Barbier = noir, vert et or (inchangé) · Femme / Coloration = noir, rose et or */
+:root{--pink:#E8579B;--pink2:#F48FC0;--blendPink:linear-gradient(135deg,#E8579B 0%,#F48FC0 45%,#D4AF37 80%,#F5D77A 100%)}
+.agh{margin:14px 0 8px;font-family:"Playfair Display",Georgia,serif;font-size:1.05rem;padding-left:10px;border-left:3px solid var(--spot)}
+.agenda:first-child .agh{margin-top:0}
+.agh.femme{border-left-color:var(--pink);color:var(--pink2)}
+.svc.femme.sel,.svc.femme.sel:hover{border-color:var(--pink);background:#2a1622;box-shadow:0 0 0 1px rgba(212,175,55,.45)}
+body.femme button:not(:disabled){background:var(--blendPink);box-shadow:0 4px 16px rgba(232,87,155,.3),0 2px 8px rgba(160,122,44,.3)}
+body.femme button:hover:not(:disabled){background:linear-gradient(135deg,#F06AA9 0%,#F8A6CE 45%,#E0BC4A 80%,#FBE59A 100%)}
+body.femme .day.sel,body.femme .day.sel:hover,body.femme .slot.sel,body.femme .slot.sel:hover{background:var(--pink);color:#000;border-color:var(--pink)}
+body.femme .slot.gap{border-color:rgba(232,87,155,.6)}
+body.femme a,body.femme .ok,body.femme .card h2.ok{color:var(--pink2)}
+body.femme .opt input{accent-color:var(--pink)}
+body.femme .tips .tp.sel{border-color:var(--pink);background:#2a1622;color:var(--pink2)}
+.tag{display:inline-block;padding:1px 8px;border-radius:500px;font-size:.72rem;font-weight:700;color:#000;background:var(--spot)}.tag.femme{background:var(--pink)}.tag.both{background:#D4AF37}

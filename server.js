@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const path = require('path');
 const { DateTime } = require('luxon');
 const cfg = require('./lib/config');
-const { availableSlots, steps, conflicts, existingSteps, svc } = require('./lib/slots');
+const { classifyBlock, availableSlots, steps, conflicts, existingSteps, svc } = require('./lib/slots');
 const calendar = require('./lib/calendar');
 const Tips = require('./lib/tips');
 const Taxes = require('./lib/taxes');
@@ -23,6 +23,9 @@ db.exec(`CREATE TABLE IF NOT EXISTS bookings (id TEXT PRIMARY KEY, service_id TE
   name TEXT, phone TEXT, email TEXT, note TEXT, deposit INTEGER, status TEXT, stripe_session TEXT, calendar_event_id TEXT, created_ms INTEGER);
   CREATE TABLE IF NOT EXISTS blocks (id INTEGER PRIMARY KEY AUTOINCREMENT, start_ms INTEGER, end_ms INTEGER, reason TEXT);
   CREATE TABLE IF NOT EXISTS tips (id TEXT PRIMARY KEY, booking_id TEXT, name TEXT, service TEXT, amount_cents INTEGER, method TEXT, status TEXT, stripe_session TEXT, created_ms INTEGER);`);
+try { db.exec('ALTER TABLE blocks ADD COLUMN agenda TEXT'); // migration: classer les blocages existants selon leur titre
+  for (const b of db.prepare('SELECT id, reason FROM blocks').all()) { const a = classifyBlock(b.reason); if (a) db.prepare('UPDATE blocks SET agenda=? WHERE id=?').run(a, b.id); }
+} catch (e) { /* colonne déjà là */ }
 for (const col of ['tip_cents', 'tps_cents', 'tvq_cents']) { try { db.exec(`ALTER TABLE bookings ADD COLUMN ${col} INTEGER DEFAULT 0`); } catch (e) { /* colonne déjà là */ } }
 
 const app = express();
@@ -34,7 +37,7 @@ app.get('/tips.js', (req, res) => res.type('js').sendFile(path.join(__dirname, '
 app.get('/pourboire', (req, res) => res.sendFile(path.join(__dirname, 'public/pourboire.html')));
 const basePrice = s => s.price || s.priceFrom || 0;
 
-app.get('/api/config', (req, res) => res.json({ salonName: cfg.salonName, services: cfg.services, openDays: cfg.openDays,
+app.get('/api/config', (req, res) => res.json({ salonName: cfg.salonName, agendas: cfg.agendas, services: cfg.services, openDays: cfg.openDays,
   open: cfg.open, close: cfg.close, horizon: cfg.bookingHorizonDays, taxes: { TPS: Taxes.TPS_RATE, TVQ: Taxes.TVQ_RATE, tpsNo: Taxes.TPS_NO, tvqNo: Taxes.TVQ_NO }, demo: DEMO, tz: cfg.timezone }));
 app.get('/api/slots', (req, res) => res.json(availableSlots(db, req.query.service, req.query.date)));
 
@@ -191,16 +194,20 @@ app.get('/api/admin/data', auth, (req, res) => {
     interac: db.prepare("SELECT * FROM bookings WHERE status='interac' AND created_ms > ? AND end_ms > ? ORDER BY start_ms").all(holdCut, now)
       .map(b => ({ ...b, ...taxInfo(b, svc(b.service_id)), ref: ref(b.id), service: svc(b.service_id).name, when: fmt(b.start_ms), expires: fmt(b.created_ms + INTERAC_HOLD_H * 3600000) })),
     bookings: db.prepare("SELECT * FROM bookings WHERE status='confirmed' AND end_ms > ? ORDER BY start_ms").all(now)
-      .map(b => ({ ...b, ...taxInfo(b, svc(b.service_id)), ref: ref(b.id), service: svc(b.service_id).name, when: fmt(b.start_ms) })),
-    blocks: db.prepare('SELECT * FROM blocks WHERE end_ms > ? ORDER BY start_ms').all(now).map(b => ({ ...b, from: fmt(b.start_ms), to: fmt(b.end_ms) })),
+      .map(b => ({ ...b, ...taxInfo(b, svc(b.service_id)), ref: ref(b.id), service: svc(b.service_id).name, agenda: svc(b.service_id).agenda, agendaName: cfg.agendas[svc(b.service_id).agenda], when: fmt(b.start_ms) })),
+    blocks: db.prepare('SELECT * FROM blocks WHERE end_ms > ? ORDER BY start_ms').all(now).map(b => ({ ...b, agendaName: b.agenda ? cfg.agendas[b.agenda] : 'Les deux agendas', from: fmt(b.start_ms), to: fmt(b.end_ms) })),
   });
 });
 app.post('/api/admin/blocks', auth, (req, res) => {
   const { date, from, to, reason } = req.body;
+  let agenda = req.body.agenda;
+  if (agenda === undefined || agenda === '' || agenda === 'auto') agenda = classifyBlock(reason);
+  else if (agenda === null || agenda === 'both' || agenda === 'tous') agenda = null;
+  else if (!cfg.agendas[agenda]) return res.status(400).json({ error: 'Agenda invalide' });
   const s = DateTime.fromISO(`${date}T${from}`, { zone: cfg.timezone }), e = DateTime.fromISO(`${date}T${to}`, { zone: cfg.timezone });
   if (!s.isValid || !e.isValid || e <= s) return res.status(400).json({ error: 'Plage invalide' });
-  db.prepare('INSERT INTO blocks (start_ms,end_ms,reason) VALUES (?,?,?)').run(s.toMillis(), e.toMillis(), reason || '');
-  res.json({ ok: true });
+  db.prepare('INSERT INTO blocks (start_ms,end_ms,reason,agenda) VALUES (?,?,?,?)').run(s.toMillis(), e.toMillis(), reason || '', agenda);
+  res.json({ ok: true, agenda });
 });
 app.post('/api/admin/tips/:id/confirm', auth, (req, res) => { db.prepare("UPDATE tips SET status='paid' WHERE id=? AND status='interac'").run(req.params.id); res.json({ ok: true }); });
 app.post('/api/admin/tips/:id/cancel', auth, (req, res) => { db.prepare("UPDATE tips SET status='cancelled' WHERE id=?").run(req.params.id); res.json({ ok: true }); });

@@ -8,7 +8,7 @@ const book=async(s,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',hea
  ok((await (await fetch(`${B}/api/slots?service=coupe-homme&date=2026-10-12`)).json()).length===0,'Lundi fermé');
  ok((await slots('coloration-meches')).at(-1).time==='15:30','Dernière plage mèches 15h30 (fin 19h30)');
  ok(await book('coupe-homme','08:30')==='confirmed','Coupe homme 8h30 réservée');
- ok((await book('coupe-femme','08:30')).startsWith('REFUSÉ'),'Double réservation 8h30 bloquée');
+ ok((await book('coupe-enfant','08:30')).startsWith('REFUSÉ'),'Double réservation 8h30 bloquée (même agenda Homme)');
  ok(await book('coloration','10:00')==='confirmed','Coloration 10h00-12h00 réservée (pause 10h30)');
  const s=await slots('coupe-femme');ok(s.find(x=>x.time==='10:30')?.inGap===true,'Plage 10h30 offerte pour coupe pendant la pause');
  ok(!s.find(x=>['10:00','11:00','11:30'].includes(x.time)),'10h00/11h00/11h30 non offertes');
@@ -16,9 +16,17 @@ const book=async(s,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',hea
  ok((await book('permanente','10:30')).startsWith('REFUSÉ'),'Permanente chevauchant pause refusée');
  ok(await book('coupe-enfant','10:30')==='confirmed','Coupe enfant réservée dans la pause 10h30');
  ok((await book('coupe-homme','10:30')).startsWith('REFUSÉ'),'Pause déjà prise: 2e coupe bloquée');
- ok(await book('coupe-homme','14:00')==='confirmed','Coupe 14h00 réservée');
+ ok(await book('coupe-femme','14:00')==='confirmed','Coupe femme 14h00 réservée');
  ok((await book('coloration-deco','13:30')).startsWith('REFUSÉ'),'Déco 13h30 refusée (14h00 occupée, pause à 14h30)');
  ok(await book('coloration-meches','13:00')==='confirmed','Mèches 13h00 réservée (sa pause 14h00 contient la coupe existante)');
+ // --- Deux agendas indépendants (Homme / Femme) ---
+ {const D3='2026-10-22',sl=async sv=>(await (await fetch(`${B}/api/slots?service=${sv}&date=${D3}`)).json()).map(x=>x.time);
+  const bk=async(sv,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({service:sv,start:`${D3}T${t}:00.000-04:00`,name:'A',phone:'514-555-0000',email:'a@ex.com'})});const j=await r.json();if(!j.url)return 'REFUSÉ';const id=new URL(j.url,B).searchParams.get('id');await fetch(B+'/api/demo-pay',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});return (await (await fetch(B+'/api/bookings/'+id)).json()).status};
+  ok(await bk('coloration','13:00')==='confirmed','Agendas: coloration 13h00-15h00 réservée');
+  const ch=await sl('coupe-homme');ok(['13:00','13:30','14:00','14:30'].every(t=>ch.includes(t)),'Agendas: coupes homme offertes 13h00-14h30 pendant la coloration');
+  ok(await bk('coupe-homme','13:00')==='confirmed'&&await bk('coupe-homme','14:00')==='confirmed','Agendas: coupes homme 13h00 et 14h00 réservées');
+  const cf=await sl('coupe-femme');ok(!cf.includes('13:00')&&cf.includes('13:30')&&!cf.includes('14:00'),'Agendas: coupe femme bloquée par la coloration (sauf sa pause 13h30)');
+  ok(await bk('coupe-femme','14:00')==='REFUSÉ'&&await bk('piercing','13:00')==='REFUSÉ','Agendas: conflits dans le même agenda refusés');}
  // --- Pause dîner 12h-13h ---
  {const d2=async sv=>(await (await fetch(`${B}/api/slots?service=${sv}&date=2026-10-16`)).json()).map(x=>x.time);
   const ch=await d2('coupe-homme'),co=await d2('coloration');
@@ -29,7 +37,13 @@ const book=async(s,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',hea
  ok((await fetch(B+'/api/admin/data')).status===401,'Admin sans mot de passe refusé');
  await fetch(B+'/api/admin/blocks',{method:'POST',headers:{'Content-Type':'application/json',Authorization:auth},body:JSON.stringify({date:D,from:'17:00',to:'18:00',reason:'Pause'})});
  ok(!(await slots('coupe-homme')).find(x=>['17:00','17:30'].includes(x.time)),'Plage bloquée par admin non disponible');
- const a=await (await fetch(B+'/api/admin/data',{headers:{Authorization:auth}})).json();ok(a.bookings.length===5&&a.blocks.length===1,'Admin liste 5 RDV + 1 blocage');
+ {const pb=async(r,ag)=>(await (await fetch(B+'/api/admin/blocks',{method:'POST',headers:{'Content-Type':'application/json',Authorization:auth},body:JSON.stringify({date:'2026-10-23',from:'09:00',to:'10:00',reason:r,...(ag?{agenda:ag}:{})})})).json()).agenda;
+  ok(await pb('Ch Dany')==='homme'&&await pb('Colo Julie')==='femme'&&await pb('Dentiste')===null&&await pb('X','femme')==='femme','Blocages: classement auto homme/femme/les deux + agenda explicite');
+  const s23=async sv=>(await (await fetch(`${B}/api/slots?service=${sv}&date=2026-10-23`)).json()).map(x=>x.time);
+  ok(!(await s23('coupe-homme')).includes('09:00')&&!(await s23('coupe-femme')).includes('09:00'),'Blocages: « les deux » bloque les deux agendas');
+  const all=await (await fetch(B+'/api/admin/data',{headers:{Authorization:auth}})).json();
+  for(const b of all.blocks.filter(b=>b.start_ms>Date.parse('2026-10-23')))await fetch(B+'/api/admin/blocks/'+b.id,{method:'DELETE',headers:{Authorization:auth}});}
+ const a=await (await fetch(B+'/api/admin/data',{headers:{Authorization:auth}})).json();ok(a.bookings.length===8&&a.blocks.length===1,'Admin liste 8 RDV + 1 blocage');
  // --- Virement Interac ---
  ok((await fetch(B+'/api/bookings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({service:'coupe-homme',start:`${D}T18:00:00.000-04:00`,name:'X',phone:'514-555-1111',email:'i@ex.com',method:'interac'})})).status===400,'Nouvelle réservation Interac refusée');
  ok((await fetch(B+'/api/tips',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'X',tip:'custom',tipCustom:'5',method:'interac'})})).status===400,'Nouveau pourboire Interac refusé');
@@ -46,7 +60,7 @@ const book=async(s,t)=>{const r=await fetch(B+'/api/bookings',{method:'POST',hea
  ok((await fetch(B+'/api/admin/bookings/'+iid+'/confirm',{method:'POST'})).status===401,'Admin: confirmation sans mot de passe refusée');
  await fetch(B+'/api/admin/bookings/'+iid+'/confirm',{method:'POST',headers:{Authorization:auth}});
  ad=await (await fetch(B+'/api/admin/data',{headers:{Authorization:auth}})).json();
- ok((await (await fetch(B+'/api/bookings/'+iid)).json()).status==='confirmed'&&ad.interac.length===0&&ad.bookings.length===6,'Admin: « Confirmer paiement reçu » confirme le RDV');
+ ok((await (await fetch(B+'/api/bookings/'+iid)).json()).status==='confirmed'&&ad.interac.length===0&&ad.bookings.length===9,'Admin: « Confirmer paiement reçu » confirme le RDV');
  const r2=await ib('coupe-femme','18:30');const iid2=new URL(r2.url,B).searchParams.get('id');
  ok((await (await fetch(B+'/api/bookings/'+iid2)).json()).deposit===10,'Interac coupe femme: dépôt 10 $');
  await fetch(B+'/api/admin/bookings/'+iid2+'/cancel',{method:'POST',headers:{Authorization:auth}});
