@@ -28,9 +28,24 @@ try { db.exec('ALTER TABLE blocks ADD COLUMN agenda TEXT'); // migration: classe
 } catch (e) { /* colonne déjà là */ }
 for (const col of ['tip_cents', 'tps_cents', 'tvq_cents']) { try { db.exec(`ALTER TABLE bookings ADD COLUMN ${col} INTEGER DEFAULT 0`); } catch (e) { /* colonne déjà là */ } }
 
+db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)');
+// Pause de la prise de RDV en ligne: réglage admin (BD) prioritaire, sinon variable d'env BOOKING_PAUSED
+const PAUSE_MSG = 'La prise de rendez-vous en ligne est temporairement suspendue. Pour un rendez-vous : 450-559-1803.';
+const bookingPaused = () => {
+  const r = db.prepare("SELECT value FROM settings WHERE key='booking_paused'").get();
+  if (r && (r.value === '1' || r.value === '0')) return r.value === '1';
+  return /^(1|true|yes|oui)$/i.test((process.env.BOOKING_PAUSED || '').trim());
+};
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+const pausePage = () => `<!doctype html><html lang="fr-CA"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Réserver · Jace Savard Studio Nord</title><meta name="theme-color" content="#000000"><link rel="stylesheet" href="/style.css"></head><body><header><img class="cover" src="/cover-banner.jpg" alt="Studio Nord — 331 rue Richard, Joliette"><a class="brand" href="/"><img src="/logo.jpg" alt="Logo Studio Nord"><div><div class="nm">Jace Savard Studio Nord</div><small>331 rue Richard, Joliette</small></div></a><h1>Prise de rendez-vous en pause</h1></header><main><div class="card"><p id="pause">La prise de rendez-vous en ligne est temporairement suspendue.</p><p>Pour un rendez-vous : <a href="tel:4505591803"><b>450-559-1803</b></a></p></div></main></body></html>`;
+app.get(['/', '/index.html'], (req, res, next) => bookingPaused() ? res.set('Cache-Control', 'no-store').send(pausePage()) : next());
+app.use(['/api/slots', '/api/bookings', '/api/demo-pay', '/api/demo-legacy-interac'], (req, res, next) => {
+  if (!bookingPaused()) return next();
+  if (req.method === 'GET' && /^\/[^/]+$/.test(req.path) && req.baseUrl === '/api/bookings') return next(); // statut d'un RDV existant (confirmation)
+  res.status(503).json({ error: PAUSE_MSG, paused: true });
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/taxes.js', (req, res) => res.type('js').sendFile(path.join(__dirname, 'lib/taxes.js')));
 app.get('/tips.js', (req, res) => res.type('js').sendFile(path.join(__dirname, 'lib/tips.js')));
@@ -38,7 +53,7 @@ app.get('/pourboire', (req, res) => res.sendFile(path.join(__dirname, 'public/po
 const basePrice = s => s.price || s.priceFrom || 0;
 
 app.get('/api/config', (req, res) => res.json({ salonName: cfg.salonName, agendas: cfg.agendas, services: cfg.services, openDays: cfg.openDays,
-  open: cfg.open, close: cfg.close, horizon: cfg.bookingHorizonDays, taxes: { TPS: Taxes.TPS_RATE, TVQ: Taxes.TVQ_RATE, tpsNo: Taxes.TPS_NO, tvqNo: Taxes.TVQ_NO }, demo: DEMO, tz: cfg.timezone }));
+  open: cfg.open, close: cfg.close, horizon: cfg.bookingHorizonDays, taxes: { TPS: Taxes.TPS_RATE, TVQ: Taxes.TVQ_RATE, tpsNo: Taxes.TPS_NO, tvqNo: Taxes.TVQ_NO }, demo: DEMO, tz: cfg.timezone, paused: bookingPaused(), pauseMessage: PAUSE_MSG }));
 app.get('/api/slots', (req, res) => res.json(availableSlots(db, req.query.service, req.query.date)));
 
 const INTERAC_EMAIL = process.env.INTERAC_EMAIL || 'jacesavard@gmail.com';
@@ -228,6 +243,12 @@ app.get('/api/admin/data', auth, (req, res) => {
       .map(b => ({ ...b, ...taxInfo(b, svc(b.service_id)), ref: ref(b.id), service: svc(b.service_id).name, agenda: svc(b.service_id).agenda, agendaName: cfg.agendas[svc(b.service_id).agenda], when: fmt(b.start_ms) })),
     blocks: db.prepare('SELECT * FROM blocks WHERE end_ms > ? ORDER BY start_ms').all(now).map(b => ({ ...b, agendaName: b.agenda ? cfg.agendas[b.agenda] : 'Les deux agendas', from: fmt(b.start_ms), to: fmt(b.end_ms) })),
   });
+});
+app.get('/api/admin/pause', auth, (req, res) => res.json({ paused: bookingPaused() }));
+app.post('/api/admin/pause', auth, (req, res) => {
+  const v = req.body && (req.body.paused === true || req.body.paused === '1' || req.body.paused === 'true');
+  db.prepare("INSERT INTO settings (key,value) VALUES ('booking_paused',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(v ? '1' : '0');
+  res.json({ ok: true, paused: bookingPaused() });
 });
 app.post('/api/admin/blocks', auth, (req, res) => {
   const { date, from, to, reason } = req.body;
